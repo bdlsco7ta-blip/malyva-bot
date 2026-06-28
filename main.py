@@ -86,28 +86,19 @@ def get_channel_stats():
 def get_recent_videos(max_results=15):
     try:
         import urllib.request
-        import json as json_lib
-        # Используем RSS фид канала — работает без OAuth
         rss_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={CHANNEL_ID}"
         req = urllib.request.Request(rss_url, headers={"User-Agent": "Mozilla/5.0"})
         with urllib.request.urlopen(req, timeout=10) as response:
             content = response.read().decode("utf-8")
-        
         import re
         video_ids = re.findall(r'<yt:videoId>([^<]+)</yt:videoId>', content)
-        titles = re.findall(r'<title>([^<]+)</title>', content)[1:]  # skip channel title
-        published = re.findall(r'<published>([^<]+)</published>', content)
-        
         if not video_ids:
             return []
-        
-        # Получаем статистику через videos.list
         youtube = get_youtube()
         videos_resp = youtube.videos().list(
             part="statistics,snippet,contentDetails",
             id=",".join(video_ids[:max_results])
         ).execute()
-        
         videos = []
         for item in videos_resp["items"]:
             stats = item["statistics"]
@@ -130,7 +121,6 @@ def get_recent_videos(max_results=15):
 
 def get_top_videos():
     try:
-        # Получаем видео через RSS и сортируем по просмотрам
         videos = get_recent_videos(15)
         return sorted(videos, key=lambda x: x["views"], reverse=True)[:5]
     except Exception as e:
@@ -175,7 +165,6 @@ async def background_monitor(app):
             history = load_history()
             videos = get_recent_videos(10)
 
-            # Новые видео
             known_ids = set(history.get("known_videos", []))
             new_videos = [v for v in videos if v["id"] not in known_ids]
             for video in new_videos:
@@ -193,7 +182,6 @@ async def background_monitor(app):
                 known_ids.add(video["id"])
             history["known_videos"] = list(known_ids)
 
-            # Вирал алерт
             snapshots = history.get("video_snapshots", {})
             for video in videos:
                 vid_id = video["id"]
@@ -216,7 +204,6 @@ async def background_monitor(app):
                 snapshots[vid_id] = {"views": current_views, "timestamp": now.isoformat()}
             history["video_snapshots"] = snapshots
 
-            # Комментарии
             known_comments = set(history.get("known_comments", []))
             for video in videos[:3]:
                 comments = get_new_comments(video["id"])
@@ -248,7 +235,6 @@ async def background_monitor(app):
                         known_comments.add(comment["id"])
             history["known_comments"] = list(known_comments)[-200:]
 
-            # Milestone алерты
             channel = get_channel_stats()
             if channel:
                 subs = channel["subscribers"]
@@ -267,19 +253,16 @@ async def background_monitor(app):
                         reached.append(milestone)
                 history["reached_milestones"] = reached
 
-                # Ежедневный отчёт в 20:00
                 today = now.date()
                 if now.hour == 20 and now.minute < 31 and last_daily != today:
                     await send_daily_report(app, channel, videos, history)
                     last_daily = today
 
-                # Еженедельный отчёт в воскресенье 19:00
                 this_week = now.isocalendar()[1]
                 if now.weekday() == 6 and now.hour == 19 and now.minute < 31 and last_weekly != this_week:
                     await send_weekly_report(app, channel, videos, history)
                     last_weekly = this_week
 
-                # Напоминание о контенте
                 check_count += 1
                 if check_count % 48 == 0:
                     shorts = [v for v in videos if v["is_short"]]
@@ -395,7 +378,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.message.from_user.id)
     user_name = update.message.from_user.full_name
     username = update.message.from_user.username or "нет"
-
     if is_approved(user_id):
         await update.message.reply_text(
             f"👋 Привет, {user_name}!\n\nДобро пожаловать в бот МАЛЮВА 🎮\nВыбери что хочешь узнать 👇",
@@ -530,11 +512,11 @@ async def cmd_shorts_vs_video(update: Update, context: ContextTypes.DEFAULT_TYPE
         f"📱 <b>SHORTS ({len(shorts)} шт):</b>\n"
         f"• Среднее: {shorts_avg:,} просмотров\n"
         f"• Лучший: {best_short['title'][:35] + '...' if best_short else 'нет'}\n"
-        f"  ({best_short['views']:,} просмотров)\n\n"
+        f"  ({best_short['views']:,} просмотров)\n\n" if best_short else ""
         f"🎥 <b>ВИДЕО ({len(longs)} шт):</b>\n"
         f"• Среднее: {longs_avg:,} просмотров\n"
         f"• Лучшее: {best_long['title'][:35] + '...' if best_long else 'нет'}\n"
-        f"  ({best_long['views']:,} просмотров)\n\n"
+        f"  ({best_long['views']:,} просмотров)\n\n" if best_long else ""
         f"🏆 Победитель: {'📱 Shorts' if shorts_avg > longs_avg else '🎥 Видео'}"
     )
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
@@ -591,7 +573,6 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text == "👥 Управление доступом":
         await cmd_manage_users(update, context)
     elif text == "TikTok":
-        from telegram import InlineKeyboardMarkup, InlineKeyboardButton
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("📊 Открыть TikTok Аналитику", url="https://www.tiktok.com/tiktok-studio/analytics")],
             [InlineKeyboardButton("📱 Перейти на канал", url="https://www.tiktok.com/@malyva21")]
@@ -619,12 +600,17 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode=ParseMode.HTML
         )
 
-async def post_init(app):
+async def post_init(app: Application) -> None:
     asyncio.create_task(background_monitor(app))
 
 def main():
     print("🤖 Бот МАЛЮВА запускается...")
-    app = Application.builder().token(TELEGRAM_BOT_TOKEN).post_init(post_init).build()
+    app = (
+        Application.builder()
+        .token(TELEGRAM_BOT_TOKEN)
+        .post_init(post_init)
+        .build()
+    )
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("top", cmd_top))
