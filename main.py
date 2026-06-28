@@ -8,24 +8,18 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 from telegram.constants import ParseMode
 from googleapiclient.discovery import build
 
-# ===== НАСТРОЙКИ — БЕРУТСЯ ИЗ ПЕРЕМЕННЫХ ОКРУЖЕНИЯ =====
 YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 OWNER_ID = os.environ.get("OWNER_ID", "136034133")
 CHANNEL_ID = os.environ.get("CHANNEL_ID", "UCAfEHDd7n_oUnsNETWbRdAQ")
 
-# Цели монетизации
 GOAL_SUBSCRIBERS = 1000
 VIRAL_GROWTH_PERCENT = 200
-
-# Файлы данных
 APPROVED_FILE = "approved_users.json"
 HISTORY_FILE = "stats_history.json"
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# ===== УПРАВЛЕНИЕ ДОСТУПОМ =====
 
 def load_approved():
     if os.path.exists(APPROVED_FILE):
@@ -41,25 +35,15 @@ def is_approved(user_id: str) -> bool:
     approved = load_approved()
     return str(user_id) == OWNER_ID or str(user_id) in approved
 
-# ===== ИСТОРИЯ ДАННЫХ =====
-
 def load_history():
     if os.path.exists(HISTORY_FILE):
         with open(HISTORY_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
-    return {
-        "daily_stats": [],
-        "video_snapshots": {},
-        "known_videos": [],
-        "known_comments": [],
-        "reached_milestones": [],
-    }
+    return {"daily_stats": [], "video_snapshots": {}, "known_videos": [], "known_comments": [], "reached_milestones": []}
 
 def save_history(data):
     with open(HISTORY_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
-
-# ===== YOUTUBE API =====
 
 def get_youtube():
     return build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
@@ -67,10 +51,7 @@ def get_youtube():
 def get_channel_stats():
     try:
         youtube = get_youtube()
-        response = youtube.channels().list(
-            part="statistics,snippet",
-            id=CHANNEL_ID
-        ).execute()
+        response = youtube.channels().list(part="statistics,snippet", id=CHANNEL_ID).execute()
         if not response["items"]:
             return None
         stats = response["items"][0]["statistics"]
@@ -86,11 +67,11 @@ def get_channel_stats():
 def get_recent_videos(max_results=15):
     try:
         import urllib.request
+        import re
         rss_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={CHANNEL_ID}"
         req = urllib.request.Request(rss_url, headers={"User-Agent": "Mozilla/5.0"})
         with urllib.request.urlopen(req, timeout=10) as response:
             content = response.read().decode("utf-8")
-        import re
         video_ids = re.findall(r'<yt:videoId>([^<]+)</yt:videoId>', content)
         if not video_ids:
             return []
@@ -131,10 +112,7 @@ def get_new_comments(video_id, max_results=20):
     try:
         youtube = get_youtube()
         response = youtube.commentThreads().list(
-            part="snippet",
-            videoId=video_id,
-            order="time",
-            maxResults=max_results
+            part="snippet", videoId=video_id, order="time", maxResults=max_results
         ).execute()
         comments = []
         for item in response.get("items", []):
@@ -150,8 +128,6 @@ def get_new_comments(video_id, max_results=20):
     except Exception as e:
         logger.error(f"Ошибка комментариев: {e}")
         return []
-
-# ===== ФОНОВЫЕ ЗАДАЧИ =====
 
 async def background_monitor(app):
     logger.info("Фоновый мониторинг запущен")
@@ -173,10 +149,7 @@ async def background_monitor(app):
                     f"🔔 <b>{type_icon} НА КАНАЛЕ!</b>\n\n"
                     f"📌 {video['title']}\n"
                     f"🔗 {video['url']}\n\n"
-                    f"⚡ <b>Первые 24 часа решают!</b>\n"
-                    f"✅ Проверь описание и теги\n"
-                    f"✅ Ответь на первые комментарии\n"
-                    f"✅ Поделись в соцсетях"
+                    f"⚡ <b>Первые 24 часа решают!</b>"
                 )
                 await app.bot.send_message(chat_id=OWNER_ID, text=text, parse_mode=ParseMode.HTML)
                 known_ids.add(video["id"])
@@ -194,11 +167,8 @@ async def background_monitor(app):
                             text = (
                                 f"🚀 <b>ВИРАЛ АЛЕРТ!</b>\n\n"
                                 f"📹 {video['title'][:50]}\n"
-                                f"🔗 {video['url']}\n\n"
                                 f"📈 Рост: +{growth:.0f}%\n"
-                                f"👁 Сейчас: {current_views:,} просмотров\n\n"
-                                f"✅ Срочно проверь комментарии!\n"
-                                f"✅ Сними похожий контент пока горячо!"
+                                f"👁 Сейчас: {current_views:,} просмотров"
                             )
                             await app.bot.send_message(chat_id=OWNER_ID, text=text, parse_mode=ParseMode.HTML)
                 snapshots[vid_id] = {"views": current_views, "timestamp": now.isoformat()}
@@ -214,22 +184,14 @@ async def background_monitor(app):
                         has_spam = any(x in text_lower for x in ["http", "www.", "t.me", "подпишись на меня"])
                         if has_spam:
                             alert = (
-                                f"🚨 <b>СПАМ В КОММЕНТАРИЯХ!</b>\n\n"
-                                f"📹 {video['title'][:40]}\n"
-                                f"👤 {comment['author']}\n"
-                                f"💬 {comment['text'][:100]}\n"
-                                f"🔗 https://youtu.be/{video['id']}\n\n"
-                                f"⚠️ Рекомендуется удалить!"
+                                f"🚨 <b>СПАМ!</b>\n👤 {comment['author']}\n"
+                                f"💬 {comment['text'][:100]}"
                             )
                             await app.bot.send_message(chat_id=OWNER_ID, text=alert, parse_mode=ParseMode.HTML)
                         elif has_question:
                             alert = (
-                                f"❓ <b>ВОПРОС В КОММЕНТАРИЯХ!</b>\n\n"
-                                f"📹 {video['title'][:40]}\n"
-                                f"👤 {comment['author']}:\n"
-                                f"💬 {comment['text'][:150]}\n"
-                                f"🔗 https://youtu.be/{video['id']}\n\n"
-                                f"💡 Быстрый ответ повышает удержание!"
+                                f"❓ <b>ВОПРОС!</b>\n👤 {comment['author']}:\n"
+                                f"💬 {comment['text'][:150]}"
                             )
                             await app.bot.send_message(chat_id=OWNER_ID, text=alert, parse_mode=ParseMode.HTML)
                         known_comments.add(comment["id"])
@@ -242,12 +204,9 @@ async def background_monitor(app):
                 reached = history.get("reached_milestones", [])
                 for milestone in milestones:
                     if subs >= milestone and milestone not in reached:
-                        emoji = "🏆" if milestone == 500 else "🎉"
                         text = (
-                            f"{emoji} <b>MILESTONE!</b>\n\n"
-                            f"👥 Канал МАЛЮВА набрал <b>{milestone} подписчиков!</b>\n\n"
-                            f"{'🎊 ЭТО МОНЕТИЗАЦИЯ!' if milestone == 500 else f'Осталось {GOAL_SUBSCRIBERS - subs} до монетизации!'}\n\n"
-                            f"{'🟩' * int(subs/GOAL_SUBSCRIBERS*10)}{'⬜' * (10-int(subs/GOAL_SUBSCRIBERS*10))} {round(subs/GOAL_SUBSCRIBERS*100, 1)}%"
+                            f"🎉 <b>MILESTONE {milestone} подписчиков!</b>\n\n"
+                            f"Осталось {GOAL_SUBSCRIBERS - subs} до монетизации!"
                         )
                         await app.bot.send_message(chat_id=OWNER_ID, text=text, parse_mode=ParseMode.HTML)
                         reached.append(milestone)
@@ -262,23 +221,6 @@ async def background_monitor(app):
                 if now.weekday() == 6 and now.hour == 19 and now.minute < 31 and last_weekly != this_week:
                     await send_weekly_report(app, channel, videos, history)
                     last_weekly = this_week
-
-                check_count += 1
-                if check_count % 48 == 0:
-                    shorts = [v for v in videos if v["is_short"]]
-                    if shorts:
-                        last_short = max(shorts, key=lambda x: x["published_at"])
-                        published = datetime.fromisoformat(last_short["published_at"].replace("Z", "+00:00"))
-                        days_ago = (datetime.now().astimezone() - published).days
-                        if days_ago >= 3:
-                            text = (
-                                f"⏰ <b>НАПОМИНАНИЕ!</b>\n\n"
-                                f"Последний Shorts был {days_ago} дней назад!\n\n"
-                                f"📱 \"{last_short['title'][:40]}...\"\n\n"
-                                f"Алгоритм любит регулярность!\n"
-                                f"💡 Цель: минимум 1 Shorts каждые 1-2 дня"
-                            )
-                            await app.bot.send_message(chat_id=OWNER_ID, text=text, parse_mode=ParseMode.HTML)
 
             save_history(history)
 
@@ -295,30 +237,13 @@ async def send_daily_report(app, channel, videos, history):
         views_yesterday = history["daily_stats"][-1].get("total_views", 0) if history["daily_stats"] else 0
         subs_growth = channel["subscribers"] - subs_yesterday
         views_growth = channel["total_views"] - views_yesterday
-        sorted_videos = sorted(videos, key=lambda x: x["views"], reverse=True)[:3]
-        shorts = [v for v in videos if v["is_short"]]
-        longs = [v for v in videos if not v["is_short"]]
         subs = channel["subscribers"]
         subs_percent = round(subs / GOAL_SUBSCRIBERS * 100, 1)
-        days_to_500 = max(0, (GOAL_SUBSCRIBERS - subs) // max(subs_growth, 1)) if subs_growth > 0 else 0
-        forecast = f"~{days_to_500} дней до 500" if subs_growth > 0 else "нет роста сегодня"
         text = (
             f"📊 <b>МАЛЮВА — Дайджест {today_str}</b>\n\n"
             f"👥 Подписчики: {subs} (+{subs_growth})\n"
             f"👁 Просмотры: +{views_growth:,}\n"
-            f"🎬 Видео: {channel['video_count']}\n\n"
-            f"🏆 <b>ТОП-3:</b>\n"
-        )
-        medals = ["1️⃣", "2️⃣", "3️⃣"]
-        for i, v in enumerate(sorted_videos):
-            icon = "📱" if v["is_short"] else "🎥"
-            text += f"{medals[i]} {icon} {v['title'][:35]}...\n   👁 {v['views']:,}\n"
-        text += (
-            f"\n📱 Shorts: {len(shorts)} шт\n"
-            f"🎥 Видео: {len(longs)} шт\n\n"
-            f"🎯 <b>Монетизация:</b>\n"
-            f"{'🟩' * int(subs_percent/10)}{'⬜' * (10-int(subs_percent/10))} {subs_percent}%\n"
-            f"⏱ {forecast}"
+            f"🎯 Прогресс: {subs_percent}%"
         )
         await app.bot.send_message(chat_id=OWNER_ID, text=text, parse_mode=ParseMode.HTML)
         history["daily_stats"].append({
@@ -333,33 +258,19 @@ async def send_daily_report(app, channel, videos, history):
 
 async def send_weekly_report(app, channel, videos, history):
     try:
-        now = datetime.now()
         subs_week_ago = history["daily_stats"][-7].get("subscribers", 0) if len(history["daily_stats"]) >= 7 else 0
         subs_week_growth = channel["subscribers"] - subs_week_ago
         shorts = [v for v in videos if v["is_short"]]
         longs = [v for v in videos if not v["is_short"]]
-        shorts_avg = sum(v["views"] for v in shorts) // max(len(shorts), 1)
-        longs_avg = sum(v["views"] for v in longs) // max(len(longs), 1)
-        best_short = max(shorts, key=lambda x: x["views"]) if shorts else None
-        best_long = max(longs, key=lambda x: x["views"]) if longs else None
         text = (
             f"📅 <b>МАЛЮВА — Недельный отчёт</b>\n\n"
-            f"📈 За неделю:\n"
-            f"👥 Подписчики: +{subs_week_growth}\n\n"
-            f"📱 <b>Shorts ({len(shorts)} шт):</b>\n"
-            f"• Среднее: {shorts_avg:,} просмотров\n"
-            f"• Лучший: {best_short['title'][:35] + '...' if best_short else 'нет'}\n\n"
-            f"🎥 <b>Видео ({len(longs)} шт):</b>\n"
-            f"• Среднее: {longs_avg:,} просмотров\n"
-            f"• Лучшее: {best_long['title'][:35] + '...' if best_long else 'нет'}\n\n"
-            f"🏆 Победитель: {'📱 Shorts' if shorts_avg > longs_avg else '🎥 Видео'}\n\n"
-            f"🎯 Цель на неделю: 5 Shorts + 1 длинное видео"
+            f"👥 Подписчики за неделю: +{subs_week_growth}\n"
+            f"📱 Shorts: {len(shorts)} шт\n"
+            f"🎥 Видео: {len(longs)} шт"
         )
         await app.bot.send_message(chat_id=OWNER_ID, text=text, parse_mode=ParseMode.HTML)
     except Exception as e:
         logger.error(f"Ошибка еженедельного отчёта: {e}")
-
-# ===== КЛАВИАТУРА =====
 
 def get_main_keyboard(user_id):
     keyboard = [
@@ -372,15 +283,13 @@ def get_main_keyboard(user_id):
         keyboard.append(["👥 Управление доступом"])
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
-# ===== КОМАНДЫ =====
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.message.from_user.id)
     user_name = update.message.from_user.full_name
     username = update.message.from_user.username or "нет"
     if is_approved(user_id):
         await update.message.reply_text(
-            f"👋 Привет, {user_name}!\n\nДобро пожаловать в бот МАЛЮВА 🎮\nВыбери что хочешь узнать 👇",
+            f"👋 Привет, {user_name}!\n\nДобро пожаловать в бот МАЛЮВА 🎮",
             reply_markup=get_main_keyboard(user_id)
         )
     else:
@@ -391,13 +300,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]])
         await context.bot.send_message(
             chat_id=OWNER_ID,
-            text=(
-                f"🔔 <b>Запрос на доступ!</b>\n\n"
-                f"👤 {user_name}\n"
-                f"🆔 {user_id}\n"
-                f"📱 @{username}\n\n"
-                f"Разрешить доступ?"
-            ),
+            text=f"🔔 <b>Запрос на доступ!</b>\n\n👤 {user_name}\n🆔 {user_id}\n📱 @{username}",
             parse_mode=ParseMode.HTML,
             reply_markup=keyboard
         )
@@ -466,11 +369,7 @@ async def cmd_top(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = "🏆 <b>Топ видео МАЛЮВА:</b>\n\n"
     medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
     for i, v in enumerate(videos[:5]):
-        text += (
-            f"{medals[i]} {v['title'][:45]}...\n"
-            f"   👁 {v['views']:,} | ❤️ {v['likes']:,}\n"
-            f"   🔗 https://youtu.be/{v['id']}\n\n"
-        )
+        text += f"{medals[i]} {v['title'][:45]}\n   👁 {v['views']:,} | ❤️ {v['likes']:,}\n   🔗 {v['url']}\n\n"
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
 async def cmd_monetization(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -488,10 +387,6 @@ async def cmd_monetization(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"{'🟩' * int(subs_percent/10)}{'⬜' * (10-int(subs_percent/10))}\n"
         f"👥 {subs}/{GOAL_SUBSCRIBERS} ({subs_percent}%)\n"
         f"Осталось: {max(0, GOAL_SUBSCRIBERS - subs)}\n\n"
-        f"<b>Shorts (цель 10 млн за 90 дней):</b>\n"
-        f"📱 Продолжай выкладывать шортсы!\n\n"
-        f"<b>Часы просмотра (цель 4000 ч):</b>\n"
-        f"⏱ Снимай длинные видео!\n\n"
         f"💡 {'Близко к цели! 🔥' if subs > 800 else 'Продолжай в том же духе!'}"
     )
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
@@ -507,16 +402,16 @@ async def cmd_shorts_vs_video(update: Update, context: ContextTypes.DEFAULT_TYPE
     longs_avg = sum(v["views"] for v in longs) // max(len(longs), 1)
     best_short = max(shorts, key=lambda x: x["views"]) if shorts else None
     best_long = max(longs, key=lambda x: x["views"]) if longs else None
+    best_short_title = best_short["title"][:35] + "..." if best_short else "нет"
+    best_long_title = best_long["title"][:35] + "..." if best_long else "нет"
     text = (
         f"📊 <b>Shorts vs Видео</b>\n\n"
         f"📱 <b>SHORTS ({len(shorts)} шт):</b>\n"
         f"• Среднее: {shorts_avg:,} просмотров\n"
-        f"• Лучший: {best_short['title'][:35] + '...' if best_short else 'нет'}\n"
-        f"  ({best_short['views']:,} просмотров)\n\n" if best_short else ""
+        f"• Лучший: {best_short_title}\n\n"
         f"🎥 <b>ВИДЕО ({len(longs)} шт):</b>\n"
         f"• Среднее: {longs_avg:,} просмотров\n"
-        f"• Лучшее: {best_long['title'][:35] + '...' if best_long else 'нет'}\n"
-        f"  ({best_long['views']:,} просмотров)\n\n" if best_long else ""
+        f"• Лучшее: {best_long_title}\n\n"
         f"🏆 Победитель: {'📱 Shorts' if shorts_avg > longs_avg else '🎥 Видео'}"
     )
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
@@ -534,7 +429,7 @@ async def cmd_comments(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not comments:
         await update.message.reply_text("💬 Комментариев пока нет.")
         return
-    text = f"💬 <b>Последние комментарии:</b>\n📹 {latest['title'][:40]}...\n\n"
+    text = f"💬 <b>Последние комментарии:</b>\n📹 {latest['title'][:40]}\n\n"
     for c in comments[:5]:
         icon = "❓" if "?" in c["text"] else "💬"
         text += f"{icon} <b>{c['author']}:</b>\n{c['text'][:100]}\n\n"
@@ -578,10 +473,7 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("📱 Перейти на канал", url="https://www.tiktok.com/@malyva21")]
         ])
         await update.message.reply_text(
-            "<b>TikTok канал МАЛЮВА</b>\n\n"
-            "Аккаунт: @malyva21\n\n"
-            "Нажми кнопку ниже чтобы открыть аналитику TikTok Studio - "
-            "там подписчики, просмотры, вовлеченность и топ видео.",
+            "<b>TikTok канал МАЛЮВА</b>\n\nАккаунт: @malyva21",
             parse_mode="HTML",
             reply_markup=keyboard
         )
@@ -593,7 +485,6 @@ async def handle_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "🎯 Прогресс монетизации\n"
             "📱 Анализ Shorts vs Видео\n"
             "💬 Последние комментарии\n"
-            "TikTok аналитика\n"
             "🔔 Авто-алерты каждые 30 минут\n\n"
             "YouTube: youtube.com/@malyva21\n"
             "TikTok: tiktok.com/@malyva21",
@@ -605,12 +496,7 @@ async def post_init(app: Application) -> None:
 
 def main():
     print("🤖 Бот МАЛЮВА запускается...")
-    app = (
-        Application.builder()
-        .token(TELEGRAM_BOT_TOKEN)
-        .post_init(post_init)
-        .build()
-    )
+    app = Application.builder().token(TELEGRAM_BOT_TOKEN).post_init(post_init).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("top", cmd_top))
